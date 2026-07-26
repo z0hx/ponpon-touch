@@ -1,0 +1,232 @@
+:root {
+  --bg: #CFEFFB;
+  --bg-prev: #CFEFFB;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  transition: background-color 900ms ease;
+  overflow: hidden;
+}
+
+/* --- ripple --- */
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0);
+  border: 6vmin solid rgba(255, 255, 255, 0.55);
+  animation: rippleOut 700ms ease-out forwards;
+}
+
+@keyframes rippleOut {
+  0%   { transform: translate(-50%, -50%) scale(0);   opacity: 0.9; }
+  100% { transform: translate(-50%, -50%) scale(1);   opacity: 0; }
+}
+
+/* --- blob creature --- */
+.blob {
+  position: absolute;
+  width: 22vmin;
+  height: 22vmin;
+  transform: translate(-50%, -50%) scale(0);
+  pointer-events: none;
+  animation: blobPop 2600ms cubic-bezier(.34,1.56,.64,1) forwards;
+}
+
+.blob svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 1vmin 1.5vmin rgba(0,0,0,0.12));
+}
+
+@keyframes blobPop {
+  0%   { transform: translate(-50%, -50%) scale(0) rotate(0deg); opacity: 1; }
+  12%  { transform: translate(-50%, -50%) scale(1.15) rotate(-4deg); opacity: 1; }
+  22%  { transform: translate(-50%, -50%) scale(0.95) rotate(3deg); opacity: 1; }
+  30%  { transform: translate(-50%, -50%) scale(1) rotate(0deg); opacity: 1; }
+  80%  { transform: translate(-50%, -60%) scale(1) rotate(0deg); opacity: 1; }
+  100% { transform: translate(-50%, -85%) scale(0.9) rotate(0deg); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ripple { animation-duration: 400ms; }
+  .blob   { animation-duration: 900ms; }
+}
+
+/* --- start hint (first-run, disappears after first touch) --- */
+#startHint {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 5;
+  transition: opacity 500ms ease;
+}
+
+#startHint p {
+  font-size: 6vmin;
+  font-weight: 700;
+  color: rgba(255,255,255,0.95);
+  text-shadow: 0 0.6vmin 1.2vmin rgba(0,0,0,0.18);
+  animation: hintPulse 1.6s ease-in-out infinite;
+  margin: 0;
+  padding: 0 8vw;
+  text-align: center;
+}
+
+@keyframes hintPulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.06); }
+}
+
+#startHint.hidden {
+  opacity: 0;
+}
+
+/* --- install hint banner (only shown when not running standalone) --- */
+#installHint {
+  position: fixed;
+  left: 50%;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.72);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  z-index: 20;
+  max-width: 88vw;
+}
+
+#installHint p { margin: 0; }
+
+#installHint button {
+  background: rgba(255,255,255,0.18);
+  border: none;
+  color: #fff;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+  flex: none;
+}
+
+/* --- parent-only corner control --- */
+#parentCorner {
+  position: fixed;
+  right: max(6px, env(safe-area-inset-right));
+  bottom: max(6px, env(safe-area-inset-bottom));
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,255,255,0.14);
+  z-index: 30;
+}
+
+#parentCorner:focus-visible {
+  outline: 2px solid rgba(255,255,255,0.9);
+  outline-offset: 2px;
+}
+
+/* --- settings panel --- */
+#settingsPanel {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(20, 20, 30, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#settingsPanel > div,
+#settingsPanel h2 {
+  background: #fff;
+}
+
+#settingsPanel {
+  padding: 20px;
+}
+
+#settingsPanel h2 {
+  font-size: 18px;
+  margin: 0 0 14px;
+  padding: 24px 24px 0;
+  border-radius: 18px 18px 0 0;
+  color: #333;
+}
+
+#settingsPanel .settingsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fff;
+  padding: 10px 24px;
+  font-size: 15px;
+  color: #333;
+}
+
+#settingsPanel button#settingsClose {
+  display: block;
+  width: calc(100% - 48px);
+  margin: 16px 24px 24px;
+  padding: 12px;
+  background: #FF6F91;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+#settingsPanel h2,
+#settingsPanel .settingsRow,
+#settingsPanel button#settingsClose {
+  max-width: 320px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+#settingsPanel {
+  flex-direction: column;
+}
+
+#settingsPanel > * {
+  box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+}
+
+#settingsPanel h2 { box-shadow: none; border-radius: 18px 18px 0 0; }
+#settingsPanel .settingsRow:last-of-type { border-radius: 0 0 18px 18px; padding-bottom: 18px; }
+
+[hidden] { display: none !important; }

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>ぽんぽんタッチ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#FF6F91">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ぽんぽんタッチ">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="description" content="画面をさわると、いろ・かたち・おとで反応する赤ちゃん向けのタッチあそび">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="stage" aria-hidden="true"></main>
+
+  <div id="startHint">
+    <p>がめんを　さわってみてね</p>
+  </div>
+
+  <div id="installHint" hidden>
+    <p>ホーム画面に追加すると、アプリのように使えます</p>
+    <button id="installHintClose" type="button" aria-label="閉じる">×</button>
+  </div>
+
+  <!-- 保護者用の小さな設定ボタン。長押し(1.2秒)でのみ開くので、
+       赤ちゃんの偶発的なタップでは反応しにくい設計にしています。 -->
+  <button id="parentCorner" type="button" aria-label="保護者用設定（長押しで開く）"></button>
+
+  <div id="settingsPanel" hidden>
+    <h2>保護者用設定</h2>
+    <label class="settingsRow">
+      <span>おと</span>
+      <input type="checkbox" id="soundToggle" checked>
+    </label>
+    <label class="settingsRow">
+      <span>はいけいの色がわり</span>
+      <input type="checkbox" id="bgToggle" checked>
+    </label>
+    <button id="settingsClose" type="button">とじる</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
