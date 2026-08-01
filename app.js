@@ -250,10 +250,141 @@
     updateBackGuard();
   });
 
-  // ---- service worker ----------------------------------------------------
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("service-worker.js").catch(() => {});
+  // ---- service worker / 更新のフィードバック --------------------------------
+  // Service Worker が cache-first なので、デプロイしても端末に新しい版が
+  // 届いたのかが分からない。いま動いているバージョンと更新状態を
+  // 保護者用設定に表示し、新しい版を見つけたらバナーで知らせる。
+  //
+  // ※ リリース時は service-worker.js の APP_VERSION も同じ値へ上げること。
+  //    (バージョン文字列がキャッシュ名に入っているので、上げないと
+  //     インストール済み端末に新しいファイルが届かない)
+  const APP_VERSION = "1.1.0";
+
+  const versionLabel = document.getElementById("versionLabel");
+  const updateStatus = document.getElementById("updateStatus");
+  const updateCheck = document.getElementById("updateCheck");
+  const updateApply = document.getElementById("updateApply");
+  const updateBanner = document.getElementById("updateBanner");
+  const updateBannerText = document.getElementById("updateBannerText");
+
+  const MIN_CHECK_INTERVAL = 60 * 1000;
+
+  let swRegistration = null;
+  let waitingWorker = null;
+  let lastCheckAt = 0;
+  let reloading = false;
+  let bannerTimer = null;
+
+  versionLabel.textContent = "v" + APP_VERSION;
+
+  function setStatus(text, state) {
+    updateStatus.textContent = text;
+    updateStatus.dataset.state = state;
+  }
+
+  function showBanner(text, autoHideMs) {
+    updateBannerText.textContent = text;
+    updateBanner.hidden = false;
+    clearTimeout(bannerTimer);
+    if (autoHideMs) bannerTimer = setTimeout(() => { updateBanner.hidden = true; }, autoHideMs);
+  }
+
+  document.getElementById("updateBannerClose").addEventListener("click", () => {
+    clearTimeout(bannerTimer);
+    updateBanner.hidden = true;
+  });
+
+  // 更新のために再読み込みした直後は、その旨を知らせる
+  try {
+    if (sessionStorage.getItem("ponpon-updated")) {
+      sessionStorage.removeItem("ponpon-updated");
+      showBanner("v" + APP_VERSION + " に更新しました", 6000);
+    }
+  } catch (e) { /* sessionStorage が使えない環境では黙って諦める */ }
+
+  function reloadForUpdate() {
+    if (reloading) return;
+    reloading = true;
+    try { sessionStorage.setItem("ponpon-updated", "1"); } catch (e) {}
+    location.reload();
+  }
+
+  function markUpdateReady(worker) {
+    waitingWorker = worker;
+    setStatus("新しいバージョンがあります", "ready");
+    updateApply.hidden = false;
+    showBanner("新しいバージョンがあります（保護者用設定から更新）");
+  }
+
+  function applyUpdate() {
+    if (!waitingWorker) { reloadForUpdate(); return; }
+    setStatus("更新しています…", "checking");
+    waitingWorker.postMessage({ type: "SKIP_WAITING" });
+    // controllerchange が届かない環境向けの保険
+    setTimeout(reloadForUpdate, 3000);
+  }
+
+  function checkForUpdate(manual) {
+    if (!swRegistration) return;
+    if (waitingWorker) return; // すでに更新待ち
+    // オフラインだと update() が確認せずに解決してしまうことがあり、
+    // 「最新です」と出ると誤解を招くので先に弾く
+    if (navigator.onLine === false) {
+      setStatus("オフラインです（確認できません）", "error");
+      return;
+    }
+    const now = Date.now();
+    if (!manual && now - lastCheckAt < MIN_CHECK_INTERVAL) return;
+    lastCheckAt = now;
+    setStatus("確認しています…", "checking");
+    swRegistration.update()
+      .then(() => {
+        if (waitingWorker || swRegistration.installing || swRegistration.waiting) return;
+        setStatus("最新です", "latest");
+      })
+      .catch(() => setStatus("確認できませんでした（オフライン？）", "error"));
+  }
+
+  function trackWorker(worker) {
+    if (!worker) return;
+    worker.addEventListener("statechange", () => {
+      // 既存の Service Worker がいる状態での installed = 更新版が用意できた
+      if (worker.state === "installed" && navigator.serviceWorker.controller) {
+        markUpdateReady(worker);
+      }
     });
+  }
+
+  updateCheck.addEventListener("click", () => checkForUpdate(true));
+  updateApply.addEventListener("click", applyUpdate);
+
+  if ("serviceWorker" in navigator) {
+    // 初回登録時は clients.claim() でも controllerchange が起きるため、
+    // 「もともと制御されていた」ときだけ再読み込みする
+    const hadController = !!navigator.serviceWorker.controller;
+
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (hadController) reloadForUpdate();
+    });
+
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("service-worker.js")
+        .then((reg) => {
+          swRegistration = reg;
+          if (reg.waiting && navigator.serviceWorker.controller) markUpdateReady(reg.waiting);
+          trackWorker(reg.installing);
+          reg.addEventListener("updatefound", () => trackWorker(reg.installing));
+          checkForUpdate(true);
+        })
+        .catch(() => setStatus("確認できませんでした", "error"));
+    });
+
+    // アプリは開きっぱなしになりやすいので、前面に戻るたびに確認する
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) checkForUpdate(false);
+    });
+  } else {
+    setStatus("この環境では自動更新に対応していません", "error");
+    updateCheck.hidden = true;
   }
 })();

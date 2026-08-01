@@ -108,11 +108,10 @@ html, body {
   opacity: 0;
 }
 
-/* --- install hint banner (only shown when not running standalone) --- */
-#installHint {
+/* --- toast banners (install hint / update notice) --- */
+.toast {
   position: fixed;
   left: 50%;
-  bottom: max(16px, env(safe-area-inset-bottom));
   transform: translateX(-50%);
   background: rgba(0,0,0,0.72);
   color: #fff;
@@ -126,9 +125,13 @@ html, body {
   max-width: 88vw;
 }
 
-#installHint p { margin: 0; }
+/* インストール案内は下、更新通知は上。同時に出ても重ならないようにする */
+#installHint { bottom: max(16px, env(safe-area-inset-bottom)); }
+#updateBanner { top: max(16px, env(safe-area-inset-top)); }
 
-#installHint button {
+.toast p { margin: 0; }
+
+.toast button {
   background: rgba(255,255,255,0.18);
   border: none;
   color: #fff;
@@ -227,6 +230,50 @@ html, body {
 }
 
 #settingsPanel h2 { box-shadow: none; border-radius: 18px 18px 0 0; }
-#settingsPanel .settingsRow:last-of-type { border-radius: 0 0 18px 18px; padding-bottom: 18px; }
+#settingsPanel .settingsRowEnd { border-radius: 0 0 18px 18px; padding-bottom: 18px; }
+
+/* --- 情報表示の行 (バージョン / 更新状態) --- */
+#settingsPanel .settingsInfo {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+#settingsPanel .settingsInfo > span:last-child {
+  color: #777;
+  font-size: 13px;
+  text-align: right;
+  line-height: 1.5;
+}
+
+#settingsPanel .settingsInfo > span:last-child[data-state="ready"] { color: #1f9d55; font-weight: 700; }
+#settingsPanel .settingsInfo > span:last-child[data-state="error"] { color: #b45309; }
+
+/* --- 更新の操作ボタン --- */
+#settingsPanel .settingsActions {
+  display: flex;
+  gap: 8px;
+  background: transparent;
+  box-shadow: none;
+  max-width: 320px;
+  width: 100%;
+  margin: 12px auto 0;
+}
+
+#settingsPanel .settingsActions button {
+  flex: 1;
+  padding: 11px;
+  border: none;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  background: rgba(255,255,255,0.92);
+  color: #444;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+}
+
+#settingsPanel .settingsActions button#updateApply {
+  background: #4CD787;
+  color: #fff;
+}
 
 [hidden] { display: none !important; }
