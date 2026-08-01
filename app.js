@@ -234,6 +234,13 @@
   // ダミーの履歴エントリを積んでおき、戻られたら積み直すことで
   // 実質的に「戻り先がない」状態を保つ。
   // ブラウザのタブで開いているときは通常どおり戻れるようにしておく。
+  //
+  // ただし Chrome には「ユーザー操作なしで積んだ履歴エントリは、戻る操作の
+  // ときにスキップする」という介入 (History Manipulation Intervention) がある。
+  // 読み込み時や popstate の中で積んだエントリは素通りされてしまうため、
+  // Android の PWA では戻るジェスチャーでアプリから抜けていた。
+  // → 積むのは「ユーザー操作の最中」だけにする。このアプリは画面を
+  //    タップして遊ぶものなので、タップのたびに補充すれば深さを保てる。
   const GUARD_DEPTH = 3;
   let guardDepth = 0;
   let backGuardActive = false;
@@ -245,7 +252,15 @@
     } catch (e) { /* history が使えない環境では何もしない */ }
   }
 
-  function refillGuard() {
+  function hasUserActivation() {
+    const ua = navigator.userActivation;
+    // 判定できない環境 (Safari など) には上記の介入自体がないので、そのまま積む
+    return ua ? ua.isActive : true;
+  }
+
+  // ユーザー操作の最中だけ、足りない分を積み直す
+  function topUpGuard() {
+    if (!backGuardActive || !hasUserActivation()) return;
     while (guardDepth < GUARD_DEPTH) {
       const before = guardDepth;
       pushGuard();
@@ -253,23 +268,25 @@
     }
   }
 
-  function enableBackGuard() {
-    if (backGuardActive) return;
-    backGuardActive = true;
-    refillGuard();
+  function updateBackGuard() {
+    backGuardActive = !!(prefs.backGuard && isStandalone());
+    // 既に積んだ分は消せないが、無効化したあとは積み直さない
+    topUpGuard();
   }
 
-  function updateBackGuard() {
-    if (prefs.backGuard && isStandalone()) enableBackGuard();
-    else backGuardActive = false; // 既に積んだ分は消せないが、積み直しはしない
-  }
+  // タップのたびに補充する。pointerdown だけだと操作扱いにならない場合が
+  // あるので、touchend / click でも受ける
+  ["pointerdown", "touchend", "click"].forEach((type) => {
+    document.addEventListener(type, topUpGuard, { capture: true, passive: true });
+  });
 
   window.addEventListener("popstate", () => {
     if (guardDepth > 0) guardDepth--;
     if (!backGuardActive) return;
     // 設定パネルが開いていれば、戻る操作は「パネルを閉じる」に割り当てる
     if (!settingsPanel.hidden) settingsPanel.hidden = true;
-    refillGuard();
+    // ここは通常ユーザー操作の外なので積めない。次のタップで補充される
+    topUpGuard();
   });
 
   // ホーム画面から起動した直後は display-mode の判定が間に合わないことがあるため、
@@ -324,7 +341,7 @@
   // ※ リリース時は service-worker.js の APP_VERSION も同じ値へ上げること。
   //    (バージョン文字列がキャッシュ名に入っているので、上げないと
   //     インストール済み端末に新しいファイルが届かない)
-  const APP_VERSION = "1.1.1";
+  const APP_VERSION = "1.1.2";
 
   const versionLabel = document.getElementById("versionLabel");
   const updateStatus = document.getElementById("updateStatus");
