@@ -1,4 +1,6 @@
-const CACHE_NAME = "ponpon-touch-v1";
+// キャッシュはcache-firstなので、配信物を更新したらここを上げること
+// (上げないとインストール済み端末に新しいapp.js/index.htmlが届かない)
+const CACHE_NAME = "ponpon-touch-v2";
 const CORE_ASSETS = [
   "./",
   "./index.html",
