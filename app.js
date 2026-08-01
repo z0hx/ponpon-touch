@@ -22,8 +22,9 @@
   const settingsPanel = document.getElementById("settingsPanel");
   const soundToggle = document.getElementById("soundToggle");
   const bgToggle = document.getElementById("bgToggle");
+  const backGuardToggle = document.getElementById("backGuardToggle");
 
-  let prefs = { sound: true, bgCycle: true, installDismissed: false };
+  let prefs = { sound: true, bgCycle: true, backGuard: true, installDismissed: false };
   try {
     const saved = JSON.parse(localStorage.getItem("ponpon-prefs") || "{}");
     prefs = Object.assign(prefs, saved);
@@ -35,6 +36,7 @@
 
   soundToggle.checked = prefs.sound;
   bgToggle.checked = prefs.bgCycle;
+  backGuardToggle.checked = prefs.backGuard;
 
   let bgIndex = 0;
   let touchCount = 0;
@@ -145,7 +147,9 @@
 
   // ---- install hint (only relevant when not already installed) ---------
   function isStandalone() {
-    return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+    return ["standalone", "fullscreen", "minimal-ui"].some(
+      (mode) => window.matchMedia("(display-mode: " + mode + ")").matches
+    ) || window.navigator.standalone === true;
   }
 
   function hideInstallHint(auto) {
@@ -157,6 +161,62 @@
     installHint.hidden = false;
   }
   document.getElementById("installHintClose").addEventListener("click", () => hideInstallHint(false));
+
+  // ---- back gesture guard -----------------------------------------------
+  // インストール済み(standalone)で遊んでいるとき、画面端からのスワイプが
+  // 「戻る」ジェスチャーになってアプリから抜けてしまうのを防ぐ。
+  // 端スワイプ自体はOSのジェスチャーなのでJSからは止められないため、
+  // ダミーの履歴エントリを積んでおき、戻られたら積み直すことで
+  // 実質的に「戻り先がない」状態を保つ。
+  // ブラウザのタブで開いているときは通常どおり戻れるようにしておく。
+  const GUARD_DEPTH = 3;
+  let guardDepth = 0;
+  let backGuardActive = false;
+
+  function pushGuard() {
+    try {
+      history.pushState({ ponponGuard: true }, "");
+      guardDepth++;
+    } catch (e) { /* history が使えない環境では何もしない */ }
+  }
+
+  function refillGuard() {
+    while (guardDepth < GUARD_DEPTH) {
+      const before = guardDepth;
+      pushGuard();
+      if (guardDepth === before) return; // pushState 失敗 — 無限ループ回避
+    }
+  }
+
+  function enableBackGuard() {
+    if (backGuardActive) return;
+    backGuardActive = true;
+    refillGuard();
+  }
+
+  function updateBackGuard() {
+    if (prefs.backGuard && isStandalone()) enableBackGuard();
+    else backGuardActive = false; // 既に積んだ分は消せないが、積み直しはしない
+  }
+
+  window.addEventListener("popstate", () => {
+    if (guardDepth > 0) guardDepth--;
+    if (!backGuardActive) return;
+    // 設定パネルが開いていれば、戻る操作は「パネルを閉じる」に割り当てる
+    if (!settingsPanel.hidden) settingsPanel.hidden = true;
+    refillGuard();
+  });
+
+  // ホーム画面から起動した直後は display-mode の判定が間に合わないことがあるため、
+  // 表示モードが変わったタイミングでも見直す。
+  ["standalone", "fullscreen", "minimal-ui"].forEach((mode) => {
+    const mq = window.matchMedia("(display-mode: " + mode + ")");
+    const onChange = () => updateBackGuard();
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+  });
+
+  updateBackGuard();
 
   // ---- parent-only settings (long-press to avoid accidental taps) ------
   let pressTimer = null;
@@ -183,6 +243,11 @@
   bgToggle.addEventListener("change", () => {
     prefs.bgCycle = bgToggle.checked;
     savePrefs();
+  });
+  backGuardToggle.addEventListener("change", () => {
+    prefs.backGuard = backGuardToggle.checked;
+    savePrefs();
+    updateBackGuard();
   });
 
   // ---- service worker ----------------------------------------------------
