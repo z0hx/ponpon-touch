@@ -47,14 +47,75 @@
   stage.style.backgroundColor = BG[bgIndex];
 
   // ---- audio ------------------------------------------------------------
+  // iOS の Web Audio は制約が多いので、以下に対処している:
+  //  1. resume() は非同期。suspended のまま start() すると、実際に再開した頃には
+  //     エンベロープの時刻が過ぎていて無音になる → 再開してから組み立てる
+  //  2. AudioContext はユーザー操作の中で作る必要がある。さらに最初の1回だけ
+  //     無音バッファを鳴らさないとロックが解けないことがある
+  //  3. 消音(サイレント)スイッチが入っていると Web Audio は鳴らない
+  //     → audioSession を "playback" にして回避する (iOS 16.4+)
+  //  4. バックグラウンドや着信のあと suspended のまま戻ってくる → 復帰時に resume
   let audioCtx = null;
+  let audioUnlocked = false;
+
   function ensureAudio() {
     if (!audioCtx) {
       const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (Ctx) audioCtx = new Ctx();
+      if (!Ctx) return null;
+      audioCtx = new Ctx();
+      // 消音スイッチが入っていても鳴らす。未対応環境では単に無視される
+      try {
+        if (navigator.audioSession) navigator.audioSession.type = "playback";
+      } catch (e) { /* 一部環境では代入できないことがある */ }
     }
-    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    if (audioCtx.state === "suspended") resumeAudio();
     return audioCtx;
+  }
+
+  function resumeAudio() {
+    if (!audioCtx) return null;
+    try {
+      const p = audioCtx.resume();
+      return p && typeof p.then === "function" ? p : Promise.resolve();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // iOS は無音バッファを1回鳴らすまでロックが解けないことがあるので、
+  // 最初のユーザー操作のなかで済ませておく
+  function unlockAudio() {
+    if (audioUnlocked || !prefs.sound) return;
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    audioUnlocked = true;
+    try {
+      const src = ctx.createBufferSource();
+      src.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      src.connect(ctx.destination);
+      src.start(0);
+    } catch (e) { /* 鳴らせなくても playTone 側で再試行される */ }
+  }
+
+  ["pointerdown", "touchend", "click"].forEach((type) => {
+    document.addEventListener(type, unlockAudio, { once: true, passive: true, capture: true });
+  });
+
+  function emitTone(ctx, freq) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.value = freq;
+    osc.connect(gain).connect(ctx.destination);
+    // 時刻はノードを作ったあとに読む。1音目は createOscillator に
+    // 数十msかかることがあり、先に読んだ時刻だとエンベロープが過去になって
+    // 無音のまま終わってしまう
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+    osc.start(now);
+    osc.stop(now + 0.52);
   }
 
   function playTone(freqIndex) {
@@ -62,18 +123,22 @@
     const ctx = ensureAudio();
     if (!ctx) return;
     const freq = NOTES[Math.max(0, Math.min(NOTES.length - 1, freqIndex))];
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "triangle";
-    osc.frequency.value = freq;
-    const now = ctx.currentTime;
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.52);
+    if (ctx.state === "running") {
+      emitTone(ctx, freq);
+      return;
+    }
+    // まだ再開していないので、再開を待ってから鳴らす
+    const p = resumeAudio();
+    if (!p) return;
+    p.then(() => {
+      if (prefs.sound && ctx.state === "running") emitTone(ctx, freq);
+    }).catch(() => {});
   }
+
+  // 着信やホームに戻ったあとは suspended のまま戻ってくることがある
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && audioCtx && audioCtx.state === "suspended") resumeAudio();
+  });
 
   // ---- visuals ------------------------------------------------------------
   function spawnRipple(x, y) {
@@ -238,7 +303,8 @@
   soundToggle.addEventListener("change", () => {
     prefs.sound = soundToggle.checked;
     savePrefs();
-    if (prefs.sound) ensureAudio();
+    // トグル操作もユーザー操作なので、ここでロックを解いておく
+    if (prefs.sound) unlockAudio();
   });
   bgToggle.addEventListener("change", () => {
     prefs.bgCycle = bgToggle.checked;
@@ -258,7 +324,7 @@
   // ※ リリース時は service-worker.js の APP_VERSION も同じ値へ上げること。
   //    (バージョン文字列がキャッシュ名に入っているので、上げないと
   //     インストール済み端末に新しいファイルが届かない)
-  const APP_VERSION = "1.1.0";
+  const APP_VERSION = "1.1.1";
 
   const versionLabel = document.getElementById("versionLabel");
   const updateStatus = document.getElementById("updateStatus");
