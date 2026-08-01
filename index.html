@@ -22,7 +22,14 @@
     <p>がめんを　さわってみてね</p>
   </div>
 
-  <div id="installHint" hidden>
+  <!-- 更新の通知。実際に更新を適用するボタンは保護者用設定の中に置き、
+       子どもの偶発的なタップで再読み込みが走らないようにしています。 -->
+  <div id="updateBanner" class="toast" hidden>
+    <p id="updateBannerText"></p>
+    <button id="updateBannerClose" type="button" aria-label="閉じる">×</button>
+  </div>
+
+  <div id="installHint" class="toast" hidden>
     <p>ホーム画面に追加すると、アプリのように使えます</p>
     <button id="installHintClose" type="button" aria-label="閉じる">×</button>
   </div>
@@ -47,6 +54,18 @@
       <span>画面はしスワイプで戻らない</span>
       <input type="checkbox" id="backGuardToggle" checked>
     </label>
+    <div class="settingsRow settingsInfo">
+      <span>バージョン</span>
+      <span id="versionLabel">-</span>
+    </div>
+    <div class="settingsRow settingsInfo settingsRowEnd">
+      <span>更新</span>
+      <span id="updateStatus">確認しています…</span>
+    </div>
+    <div class="settingsActions">
+      <button id="updateCheck" type="button">更新を確認</button>
+      <button id="updateApply" type="button" hidden>更新する</button>
+    </div>
     <button id="settingsClose" type="button">とじる</button>
   </div>
 
