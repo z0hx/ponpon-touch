@@ -44,6 +44,13 @@
   const activeBlobCount = { n: 0 };
   const MAX_BLOBS = 18;
 
+  // なぞり(トレイル)用
+  const MAX_TRAIL_FACES = 24;
+  const TRAIL_SOUND_INTERVAL = 70; // ms — これ以上は詰めて鳴らさない
+  const strokes = new Map(); // pointerId -> { x, y, note }
+  let trailCount = 0;
+  let lastTrailSoundAt = 0;
+
   stage.style.backgroundColor = BG[bgIndex];
 
   // ---- audio ------------------------------------------------------------
@@ -118,21 +125,104 @@
     osc.stop(now + 0.52);
   }
 
-  function playTone(freqIndex) {
+  // なぞったときの音。タップの音とは別の音色にしつつ、同じ音階から選ぶので
+  // 混ざっても濁らない。
+  //  - 立ち上がりに軽いしゃくり上げ → 「ぽろん」と弾むような楽しい粒になる
+  //  - 12度上のかすかな倍音 → きらきらした響き
+  //  - 音量は控えめ + ローパスで高域を丸める → 連続で鳴っても耳に刺さらない
+  //  - 触っている位置で左右に振る → なぞった軌跡が音でも動く
+  //
+  // 素早くなぞると音が重なるので、まとめてコンプレッサーに通してから出す。
+  // (重なった瞬間だけ音量が跳ね上がって驚かせてしまうのを防ぐ)
+  let sparkleBus = null;
+  function sparkleOutput(ctx) {
+    // AudioContext は作り直されないが、念のため取り違えを防いでおく
+    if (sparkleBus && sparkleBus.context === ctx) return sparkleBus;
+    if (!ctx.createDynamicsCompressor) return ctx.destination;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -24;
+    comp.knee.value = 30;
+    comp.ratio.value = 12;
+    comp.attack.value = 0.003;
+    comp.release.value = 0.25;
+    comp.connect(ctx.destination);
+    sparkleBus = comp;
+    return comp;
+  }
+
+  function emitSparkle(ctx, freq, pan) {
+    const osc = ctx.createOscillator();
+    const shine = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const shineGain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    filter.type = "lowpass";
+    filter.frequency.value = 4200;
+    filter.Q.value = 0.6;
+
+    let out = filter;
+    // StereoPanner が無い環境 (古いiOSなど) では左右振りだけ省く
+    if (ctx.createStereoPanner) {
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = Math.max(-1, Math.min(1, pan));
+      filter.connect(panner);
+      out = panner;
+    }
+    out.connect(sparkleOutput(ctx));
+
+    osc.type = "sine";
+    shine.type = "sine";
+    osc.connect(gain).connect(filter);
+    shine.connect(shineGain).connect(filter);
+
+    const now = ctx.currentTime;
+    osc.frequency.setValueAtTime(freq * 0.72, now);
+    osc.frequency.exponentialRampToValueAtTime(freq, now + 0.05);
+    shine.frequency.setValueAtTime(freq * 3, now);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.13, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+
+    shineGain.gain.setValueAtTime(0.0001, now);
+    shineGain.gain.exponentialRampToValueAtTime(0.035, now + 0.006);
+    shineGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+
+    osc.start(now);
+    shine.start(now);
+    osc.stop(now + 0.34);
+    shine.stop(now + 0.34);
+  }
+
+  // emit は ctx を受け取って鳴らすだけの関数。
+  // suspended のときは再開を待ってから呼ぶ (時刻を再開後に読む必要があるため)
+  function playSound(emit) {
     if (!prefs.sound) return;
     const ctx = ensureAudio();
     if (!ctx) return;
-    const freq = NOTES[Math.max(0, Math.min(NOTES.length - 1, freqIndex))];
     if (ctx.state === "running") {
-      emitTone(ctx, freq);
+      emit(ctx);
       return;
     }
     // まだ再開していないので、再開を待ってから鳴らす
     const p = resumeAudio();
     if (!p) return;
     p.then(() => {
-      if (prefs.sound && ctx.state === "running") emitTone(ctx, freq);
+      if (prefs.sound && ctx.state === "running") emit(ctx);
     }).catch(() => {});
+  }
+
+  function playTone(freqIndex) {
+    const freq = NOTES[Math.max(0, Math.min(NOTES.length - 1, freqIndex))];
+    playSound((ctx) => emitTone(ctx, freq));
+  }
+
+  function playSparkle(noteIndex, x) {
+    // タップより1オクターブ上。軽やかで、タップの音と聞き分けやすい
+    const freq = NOTES[Math.max(0, Math.min(NOTES.length - 1, noteIndex))] * 2;
+    const pan = ((x / window.innerWidth) * 2 - 1) * 0.7;
+    playSound((ctx) => emitSparkle(ctx, freq, pan));
   }
 
   // 着信やホームに戻ったあとは suspended のまま戻ってくることがある
@@ -151,24 +241,45 @@
     el.addEventListener("animationend", () => el.remove(), { once: true });
   }
 
-  function spawnBlob(x, y) {
-    if (activeBlobCount.n >= MAX_BLOBS) return;
+  // タップで出る顔。なぞりの軌跡もこれと同じ顔を小さくして使う
+  function faceSVG() {
     const color = ACCENT[Math.floor(Math.random() * ACCENT.length)];
     const path = BLOB_PATHS[Math.floor(Math.random() * BLOB_PATHS.length)];
-    const el = document.createElement("div");
-    el.className = "blob";
-    el.style.left = x + "px";
-    el.style.top = y + "px";
-    el.innerHTML =
+    return (
       '<svg viewBox="0 0 100 100">' +
       '<path d="' + path + '" fill="' + color + '"/>' +
       '<circle cx="38" cy="46" r="5" fill="#2b2242"/>' +
       '<circle cx="64" cy="46" r="5" fill="#2b2242"/>' +
       '<path d="M40 60 Q50 72 62 60" stroke="#2b2242" stroke-width="4" fill="none" stroke-linecap="round"/>' +
-      "</svg>";
+      "</svg>"
+    );
+  }
+
+  function spawnBlob(x, y) {
+    if (activeBlobCount.n >= MAX_BLOBS) return;
+    const el = document.createElement("div");
+    el.className = "blob";
+    el.style.left = x + "px";
+    el.style.top = y + "px";
+    el.innerHTML = faceSVG();
     stage.appendChild(el);
     activeBlobCount.n++;
     el.addEventListener("animationend", () => { el.remove(); activeBlobCount.n--; }, { once: true });
+  }
+
+  // なぞった軌跡に置く小さい顔。タップのものより小さく・短命にして、
+  // 連続で出しても画面が埋まらないようにしている
+  function spawnTrailFace(x, y) {
+    if (trailCount >= MAX_TRAIL_FACES) return;
+    const el = document.createElement("div");
+    el.className = "blob trail";
+    el.style.left = x + "px";
+    el.style.top = y + "px";
+    el.style.setProperty("--rot", (Math.random() * 40 - 20).toFixed(1) + "deg");
+    el.innerHTML = faceSVG();
+    stage.appendChild(el);
+    trailCount++;
+    el.addEventListener("animationend", () => { el.remove(); trailCount--; }, { once: true });
   }
 
   function maybeCycleBackground() {
@@ -196,8 +307,68 @@
     maybeCycleBackground();
   }
 
+  // ---- なぞり ------------------------------------------------------------
+  // 指を滑らせているあいだ、通ったところに顔を置いていく。
+  // 指ごとに前回置いた位置を覚えておき、一定距離すすむたびに1つ置く。
+  // (イベントごとに置くと端末の性能で密度が変わってしまうため)
+
+  // 画面サイズに対する間隔。小さい画面で出過ぎないようにしている
+  function trailStep() {
+    return Math.max(22, Math.min(window.innerWidth, window.innerHeight) * 0.06);
+  }
+
+  function strokeStart(id, x, y) {
+    // 音は指ごとに低い音から始めて、なぞるほど上がっていく
+    strokes.set(id, { x: x, y: y, note: Math.floor(Math.random() * 3) });
+  }
+
+  function strokeMove(id, x, y) {
+    const s = strokes.get(id);
+    if (!s) return;
+    const step = trailStep();
+    const dx = x - s.x;
+    const dy = y - s.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < step) return;
+
+    // 速く動かしたときに軌跡が飛ばないよう、間を埋めながら置く。
+    // ただし一気に動かされたときのために置く数は制限する
+    const count = Math.min(Math.floor(dist / step), 4);
+    for (let i = 1; i <= count; i++) {
+      const t = (step * i) / dist;
+      spawnTrailFace(s.x + dx * t, s.y + dy * t);
+    }
+    const moved = (step * count) / dist;
+    s.x += dx * moved;
+    s.y += dy * moved;
+
+    const now = Date.now();
+    if (now - lastTrailSoundAt >= TRAIL_SOUND_INTERVAL) {
+      lastTrailSoundAt = now;
+      playSparkle(s.note, x);
+    }
+    s.note = (s.note + 1) % NOTES.length;
+  }
+
+  function strokeEnd(id) {
+    strokes.delete(id);
+  }
+
   stage.addEventListener("pointerdown", (e) => {
     handleTouch(e.clientX, e.clientY);
+    strokeStart(e.pointerId, e.clientX, e.clientY);
+    // 指が #stage の外 (保護者用ボタンの上など) へ出ても追い続けられるようにする
+    try { stage.setPointerCapture(e.pointerId); } catch (err) { /* 捕捉できなくても軌跡が途切れるだけ */ }
+  });
+
+  // Pointer Events は指ごとに pointerId 付きで飛んでくるので、
+  // 多点タッチでもそれぞれの軌跡がそのまま扱える
+  stage.addEventListener("pointermove", (e) => {
+    strokeMove(e.pointerId, e.clientX, e.clientY);
+  });
+
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach((type) => {
+    stage.addEventListener(type, (e) => strokeEnd(e.pointerId));
   });
 
   // support additional simultaneous touch points beyond the primary pointer
@@ -341,7 +512,7 @@
   // ※ リリース時は service-worker.js の APP_VERSION も同じ値へ上げること。
   //    (バージョン文字列がキャッシュ名に入っているので、上げないと
   //     インストール済み端末に新しいファイルが届かない)
-  const APP_VERSION = "1.1.2";
+  const APP_VERSION = "1.2.0";
 
   const versionLabel = document.getElementById("versionLabel");
   const updateStatus = document.getElementById("updateStatus");

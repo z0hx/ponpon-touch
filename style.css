@@ -71,9 +71,28 @@ html, body {
   100% { transform: translate(-50%, -85%) scale(0.9) rotate(0deg); opacity: 0; }
 }
 
+/* --- なぞった軌跡に出る顔 (タップのものと同じ顔を小さく) --- */
+.blob.trail {
+  width: 11vmin;
+  height: 11vmin;
+  animation: trailPop 1100ms cubic-bezier(.34,1.56,.64,1) forwards;
+}
+
+.blob.trail svg {
+  filter: drop-shadow(0 0.4vmin 0.8vmin rgba(0,0,0,0.10));
+}
+
+@keyframes trailPop {
+  0%   { transform: translate(-50%, -50%) scale(0)    rotate(0deg);      opacity: 0.95; }
+  25%  { transform: translate(-50%, -50%) scale(1.1)  rotate(var(--rot, 0deg)); opacity: 1; }
+  40%  { transform: translate(-50%, -50%) scale(1)    rotate(var(--rot, 0deg)); opacity: 1; }
+  100% { transform: translate(-50%, -70%) scale(0.55) rotate(var(--rot, 0deg)); opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .ripple { animation-duration: 400ms; }
-  .blob   { animation-duration: 900ms; }
+  .ripple      { animation-duration: 400ms; }
+  .blob        { animation-duration: 900ms; }
+  .blob.trail  { animation-duration: 500ms; }
 }
 
 /* --- start hint (first-run, disappears after first touch) --- */

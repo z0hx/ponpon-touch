@@ -1,7 +1,7 @@
 // キャッシュはcache-firstなので、配信物を更新したらここを上げること
 // (上げないとインストール済み端末に新しいapp.js/index.htmlが届かない)
 // app.js の APP_VERSION と同じ値にそろえる。
-const APP_VERSION = "1.1.2";
+const APP_VERSION = "1.2.0";
 const CACHE_NAME = "ponpon-touch-v" + APP_VERSION;
 const CORE_ASSETS = [
   "./",
