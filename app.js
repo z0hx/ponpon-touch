@@ -45,10 +45,8 @@
   const MAX_BLOBS = 18;
 
   // なぞり(トレイル)用
-  const MAX_TRAIL_FACES = 24;
   const TRAIL_SOUND_INTERVAL = 70; // ms — これ以上は詰めて鳴らさない
   const strokes = new Map(); // pointerId -> { x, y, note }
-  let trailCount = 0;
   let lastTrailSoundAt = 0;
 
   stage.style.backgroundColor = BG[bgIndex];
@@ -267,10 +265,9 @@
     el.addEventListener("animationend", () => { el.remove(); activeBlobCount.n--; }, { once: true });
   }
 
-  // なぞった軌跡に置く小さい顔。タップのものより小さく・短命にして、
-  // 連続で出しても画面が埋まらないようにしている
+  // なぞった軌跡に置く小さい顔。個数の上限は設けず、なぞった分だけ出す。
+  // (波紋と同じく、アニメーションが終わったものから消えていく)
   function spawnTrailFace(x, y) {
-    if (trailCount >= MAX_TRAIL_FACES) return;
     const el = document.createElement("div");
     el.className = "blob trail";
     el.style.left = x + "px";
@@ -278,8 +275,7 @@
     el.style.setProperty("--rot", (Math.random() * 40 - 20).toFixed(1) + "deg");
     el.innerHTML = faceSVG();
     stage.appendChild(el);
-    trailCount++;
-    el.addEventListener("animationend", () => { el.remove(); trailCount--; }, { once: true });
+    el.addEventListener("animationend", () => el.remove(), { once: true });
   }
 
   function maybeCycleBackground() {
@@ -512,7 +508,7 @@
   // ※ リリース時は service-worker.js の APP_VERSION も同じ値へ上げること。
   //    (バージョン文字列がキャッシュ名に入っているので、上げないと
   //     インストール済み端末に新しいファイルが届かない)
-  const APP_VERSION = "1.2.0";
+  const APP_VERSION = "1.2.1";
 
   const versionLabel = document.getElementById("versionLabel");
   const updateStatus = document.getElementById("updateStatus");
