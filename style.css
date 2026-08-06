@@ -89,10 +89,32 @@ html, body {
   100% { transform: translate(-50%, -70%) scale(0.55) rotate(var(--rot, 0deg)); opacity: 0; }
 }
 
+/* --- 長押しでふくらむ顔 ---
+   大きさはJSが transform: scale() で毎フレーム更新するので、
+   .blob のポップアニメーションは止めておく。 */
+.blob.grow {
+  width: 14vmin;
+  height: 14vmin;
+  animation: none;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* 離したとき、そのときの大きさ (--s) から弾けて消える */
+.blob.grow.popping {
+  animation: growPop 480ms cubic-bezier(.22,.9,.3,1) forwards;
+}
+
+@keyframes growPop {
+  0%   { transform: translate(-50%, -50%) scale(var(--s, 1));               opacity: 1; }
+  22%  { transform: translate(-50%, -50%) scale(calc(var(--s, 1) * 1.16));  opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(calc(var(--s, 1) * 1.45));  opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .ripple      { animation-duration: 400ms; }
-  .blob        { animation-duration: 900ms; }
-  .blob.trail  { animation-duration: 500ms; }
+  .ripple           { animation-duration: 400ms; }
+  .blob             { animation-duration: 900ms; }
+  .blob.trail       { animation-duration: 500ms; }
+  .blob.grow.popping { animation-duration: 260ms; }
 }
 
 /* --- start hint (first-run, disappears after first touch) --- */
