@@ -49,6 +49,14 @@
   const strokes = new Map(); // pointerId -> { x, y, note }
   let lastTrailSoundAt = 0;
 
+  // 長押し(ふくらむ顔)用
+  const HOLD_DELAY = 260;      // ms これだけ押し続けたら育ちはじめる
+  const HOLD_MOVE_SLOP = 14;   // px これ以上動いたら「なぞり」とみなして育てない
+  const GROW_DURATION = 3200;  // ms 最大の大きさになるまで
+  const GROW_MAX_SCALE = 6;    // CSS上の大きさ(14vmin)の何倍まで育つか
+  const holds = new Map();     // pointerId -> hold
+  let growRaf = 0;
+
   stage.style.backgroundColor = BG[bgIndex];
 
   // ---- audio ------------------------------------------------------------
@@ -193,6 +201,80 @@
     shine.stop(now + 0.34);
   }
 
+  // 長押しで顔が育っているあいだ、ずっと鳴らしている音。
+  // ふくらんでいく感じが出るよう、育つ時間をかけてゆっくり音程を上げる。
+  // 音程の変化は最初にまとめて予約しておく (毎フレーム指定すると重いため)。
+  // わずかにずらした2音を重ねてやわらかい音色にし、ローパスで角を丸めている。
+  function startGrowVoice(hold) {
+    playSound((ctx) => {
+      // 音を出す準備ができるより先に指が離されていたら、もう鳴らさない
+      if (!hold.growing) return;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 2600;
+      filter.Q.value = 0.7;
+
+      const gain = ctx.createGain();
+      filter.connect(gain).connect(sparkleOutput(ctx));
+
+      const oscs = [0, 6].map((detune) => {
+        const o = ctx.createOscillator();
+        o.type = "triangle";
+        o.detune.value = detune;
+        o.connect(filter);
+        return o;
+      });
+
+      const now = ctx.currentTime;
+      oscs.forEach((o) => {
+        o.frequency.setValueAtTime(hold.note, now);
+        o.frequency.exponentialRampToValueAtTime(hold.note * 2, now + GROW_DURATION / 1000);
+        o.start(now);
+      });
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.085, now + 0.12);
+
+      hold.voice = { ctx: ctx, gain: gain, oscs: oscs };
+    });
+  }
+
+  function stopGrowVoice(hold) {
+    const v = hold.voice;
+    hold.voice = null;
+    if (!v) return;
+    const now = v.ctx.currentTime;
+    try {
+      v.gain.gain.cancelScheduledValues(now);
+      // 現在の音量から始めないと、切った瞬間にプツッと鳴ってしまう
+      v.gain.gain.setValueAtTime(Math.max(v.gain.gain.value, 0.0001), now);
+      v.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+      v.oscs.forEach((o) => o.stop(now + 0.1));
+    } catch (e) { /* すでに止まっていることがある */ }
+  }
+
+  // 離したときの「ぽんっ」。大きく育っているほど低く、重たい音になる
+  function emitPop(ctx, freq) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 2400;
+    filter.Q.value = 0.7;
+    osc.type = "sine";
+    osc.connect(gain).connect(filter).connect(sparkleOutput(ctx));
+
+    const now = ctx.currentTime;
+    osc.frequency.setValueAtTime(freq * 1.7, now);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.85, now + 0.09);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.2, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+    osc.start(now);
+    osc.stop(now + 0.32);
+  }
+
   // emit は ctx を受け取って鳴らすだけの関数。
   // suspended のときは再開を待ってから呼ぶ (時刻を再開後に読む必要があるため)
   function playSound(emit) {
@@ -221,6 +303,11 @@
     const freq = NOTES[Math.max(0, Math.min(NOTES.length - 1, noteIndex))] * 2;
     const pan = ((x / window.innerWidth) * 2 - 1) * 0.7;
     playSound((ctx) => emitSparkle(ctx, freq, pan));
+  }
+
+  function playPop(note, grownRatio) {
+    const freq = note * (1.5 - 0.7 * Math.max(0, Math.min(1, grownRatio)));
+    playSound((ctx) => emitPop(ctx, freq));
   }
 
   // 着信やホームに戻ったあとは suspended のまま戻ってくることがある
@@ -350,9 +437,106 @@
     strokes.delete(id);
   }
 
+  // ---- 長押し ------------------------------------------------------------
+  // 指を置いたままにしていると、その場で顔がどんどん大きくなっていく。
+  // 育っているあいだは顔が指についてくる。離すと「ぽんっ」と弾けて消える。
+  // 指を動かしたときは「なぞり」のほうをしたいはずなので、育てはじめない。
+
+  function holdStart(id, x, y) {
+    const hold = {
+      x: x, y: y, originX: x, originY: y,
+      growing: false, el: null, voice: null, startAt: 0, scale: 1,
+      note: NOTES[Math.floor(Math.random() * 4)],
+    };
+    hold.timer = setTimeout(() => growStart(id), HOLD_DELAY);
+    holds.set(id, hold);
+  }
+
+  function growStart(id) {
+    const hold = holds.get(id);
+    if (!hold) return;
+    hold.growing = true;
+    hold.startAt = performance.now();
+    // 育てているあいだは、なぞりの軌跡は出さない
+    strokes.delete(id);
+
+    const el = document.createElement("div");
+    el.className = "blob grow";
+    el.style.left = hold.x + "px";
+    el.style.top = hold.y + "px";
+    el.innerHTML = faceSVG();
+    stage.appendChild(el);
+    hold.el = el;
+
+    startGrowVoice(hold);
+    if (!growRaf) growRaf = requestAnimationFrame(growTick);
+  }
+
+  function growTick(now) {
+    growRaf = 0;
+    let growing = false;
+    holds.forEach((hold) => {
+      if (!hold.growing) return;
+      growing = true;
+      const p = Math.min((now - hold.startAt) / GROW_DURATION, 1);
+      // はじめは勢いよく、だんだんゆっくり大きくなる
+      const eased = 1 - Math.pow(1 - p, 2);
+      // 大きくなるほど、ゆっくり呼吸しているように揺れる
+      const breath = 1 + Math.sin(now / 380) * 0.02 * p;
+      hold.scale = (1 + (GROW_MAX_SCALE - 1) * eased) * breath;
+      hold.el.style.transform = "translate(-50%, -50%) scale(" + hold.scale.toFixed(3) + ")";
+    });
+    if (growing) growRaf = requestAnimationFrame(growTick);
+  }
+
+  function holdMove(id, x, y) {
+    const hold = holds.get(id);
+    if (!hold) return;
+    if (hold.growing) {
+      // 育っている顔は指についてくる
+      hold.x = x;
+      hold.y = y;
+      hold.el.style.left = x + "px";
+      hold.el.style.top = y + "px";
+      return;
+    }
+    const dx = x - hold.originX;
+    const dy = y - hold.originY;
+    if (Math.sqrt(dx * dx + dy * dy) > HOLD_MOVE_SLOP) {
+      clearTimeout(hold.timer);
+      holds.delete(id);
+    }
+  }
+
+  function holdEnd(id) {
+    const hold = holds.get(id);
+    if (!hold) return;
+    holds.delete(id);
+    clearTimeout(hold.timer);
+    if (!hold.growing) return;
+    // 音を出す準備を待っているコールバックにも、もう鳴らさないことを伝える
+    hold.growing = false;
+
+    stopGrowVoice(hold);
+    playPop(hold.note, (hold.scale - 1) / (GROW_MAX_SCALE - 1));
+    spawnRipple(hold.x, hold.y);
+
+    // いま育っている大きさから弾けさせる
+    const el = hold.el;
+    el.style.setProperty("--s", hold.scale.toFixed(3));
+    el.classList.add("popping");
+    el.addEventListener("animationend", () => el.remove(), { once: true });
+  }
+
+  // 押しっぱなしのままアプリが隠れると、音が鳴り続けたまま戻ってこられなくなる
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) holds.forEach((hold, id) => holdEnd(id));
+  });
+
   stage.addEventListener("pointerdown", (e) => {
     handleTouch(e.clientX, e.clientY);
     strokeStart(e.pointerId, e.clientX, e.clientY);
+    holdStart(e.pointerId, e.clientX, e.clientY);
     // 指が #stage の外 (保護者用ボタンの上など) へ出ても追い続けられるようにする
     try { stage.setPointerCapture(e.pointerId); } catch (err) { /* 捕捉できなくても軌跡が途切れるだけ */ }
   });
@@ -360,11 +544,15 @@
   // Pointer Events は指ごとに pointerId 付きで飛んでくるので、
   // 多点タッチでもそれぞれの軌跡がそのまま扱える
   stage.addEventListener("pointermove", (e) => {
+    holdMove(e.pointerId, e.clientX, e.clientY);
     strokeMove(e.pointerId, e.clientX, e.clientY);
   });
 
   ["pointerup", "pointercancel", "lostpointercapture"].forEach((type) => {
-    stage.addEventListener(type, (e) => strokeEnd(e.pointerId));
+    stage.addEventListener(type, (e) => {
+      holdEnd(e.pointerId);
+      strokeEnd(e.pointerId);
+    });
   });
 
   // support additional simultaneous touch points beyond the primary pointer
@@ -508,7 +696,7 @@
   // ※ リリース時は service-worker.js の APP_VERSION も同じ値へ上げること。
   //    (バージョン文字列がキャッシュ名に入っているので、上げないと
   //     インストール済み端末に新しいファイルが届かない)
-  const APP_VERSION = "1.2.1";
+  const APP_VERSION = "1.3.0";
 
   const versionLabel = document.getElementById("versionLabel");
   const updateStatus = document.getElementById("updateStatus");
