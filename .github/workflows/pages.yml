@@ -2,17 +2,24 @@
 #
 # もともとは Pages の「ブランチから配信」設定にまかせて、GitHub が自動生成する
 # pages-build-deployment ワークフローで配信していた。しかし GitHub 側の障害の
-# あと、そのワークフローが以下の状態から復帰しなくなった:
+# あと、このリポジトリの Pages サイトが失われた状態になり
+# (configure-pages が "Get Pages site failed. Error: Not Found" を返す)、
+# 配信が復帰しなくなった:
 #   - デプロイは登録されるが deployment_queued のまま進まず10分でタイムアウト
+#     (配信先のサイトが無いので、処理されようがない)
 #   - 再実行しても queued のままジョブが割り当てられない
 #   - しかもキャンセルAPIは 409 Cannot cancel a workflow re-run that has not
 #     yet queued を返し、取り消すこともできない
-# 自動生成のワークフローはこちらから作り直せないため、配信を自前のワークフローに
-# 移してその経路を使わないようにする。
 #
-# configure-pages の enablement: true で、Pages の配信元を
-# 「ブランチから配信」から「GitHub Actions」へ切り替える。これにより Pages が
-# 再構成され、詰まっていた配信経路を使わずに済む。
+# Pages サイトの作成には管理者権限が必要で、ワークフローの GITHUB_TOKEN では
+# 作成できない (configure-pages の enablement: true は
+# "Resource not accessible by integration" で失敗する)。
+# そのため、サイトの用意だけはリポジトリ設定で行う必要がある:
+#
+#   Settings → Pages → Source を「GitHub Actions」にする
+#
+# それさえ済めば、以降の配信はこのワークフローが行う。自動生成の
+# ワークフローには戻らないので、詰まっていた経路を使わずに済む。
 name: Deploy to GitHub Pages
 
 on:
@@ -42,10 +49,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
+      # configure-pages は使わない。サイトが無い状態では Not Found で落ちるうえ、
+      # 静的ファイルを上げるだけのこのサイトでは出力(base_url など)も使わない。
 
       # 静的ファイルだけのサイトなので、リポジトリ全体をそのまま上げる
       # (.git と .github はアクション側で除外される)
