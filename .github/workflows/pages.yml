@@ -1,0 +1,59 @@
+# GitHub Pages へのデプロイ
+#
+# もともとは Pages の「ブランチから配信」設定にまかせて、GitHub が自動生成する
+# pages-build-deployment ワークフローで配信していた。しかし GitHub 側の障害の
+# あと、そのワークフローが以下の状態から復帰しなくなった:
+#   - デプロイは登録されるが deployment_queued のまま進まず10分でタイムアウト
+#   - 再実行しても queued のままジョブが割り当てられない
+#   - しかもキャンセルAPIは 409 Cannot cancel a workflow re-run that has not
+#     yet queued を返し、取り消すこともできない
+# 自動生成のワークフローはこちらから作り直せないため、配信を自前のワークフローに
+# 移してその経路を使わないようにする。
+#
+# configure-pages の enablement: true で、Pages の配信元を
+# 「ブランチから配信」から「GitHub Actions」へ切り替える。これにより Pages が
+# 再構成され、詰まっていた配信経路を使わずに済む。
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  # 再実行(re-run)が詰まったときのために、手動でも新しい実行を起こせるようにしておく
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 自動生成ワークフロー側のグループに巻き込まれないよう、別の名前にしている。
+# 滞留している実行が同じグループを掴んでいると、こちらまで待たされてしまう。
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      # 静的ファイルだけのサイトなので、リポジトリ全体をそのまま上げる
+      # (.git と .github はアクション側で除外される)
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
